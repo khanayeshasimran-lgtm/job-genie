@@ -1,4 +1,5 @@
 import { createFileRoute, useParams, Link } from "@tanstack/react-router";
+import { VoiceAnswerCoach } from "@/components/VoiceAnswerCoach";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
@@ -872,24 +873,28 @@ function PrepPage() {
         )}
 
         {/* ── 3. Mock interview questions ── */}
-        {prep && (
-          <Panel style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
-              <AccentLabel>✦ Mock interview questions</AccentLabel>
-              <div style={{ display: "flex", gap: 8 }}>
-                {Object.entries(CATEGORY_COLORS).map(([cat, colors]) => (
-                  <span key={cat} style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: colors.bg, color: colors.text, letterSpacing: "0.05em" }}>
-                    {cat}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {prep.questions.map((q, i) => <QuestionCard key={i} q={q} index={i} />)}
-            </div>
-          </Panel>
-        )}
-
+{prep && (
+  <Panel style={{ marginBottom: 16 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+      <AccentLabel>✦ Mock interview questions</AccentLabel>
+      <div style={{ display: "flex", gap: 8 }}>
+        {Object.entries(CATEGORY_COLORS).map(([cat, colors]) => (
+          <span key={cat} style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: colors.bg, color: colors.text, letterSpacing: "0.05em" }}>
+            {cat}
+          </span>
+        ))}
+      </div>
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {prep.questions.map((q, i) => (
+        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <QuestionCard q={q} index={i} />
+          <VoiceAnswerCoach jobId={jobId} question={q.question} />
+        </div>
+      ))}
+    </div>
+  </Panel>
+)}
         {/* ── 4. Interview simulation ── */}
         {application?.id && (
           <InterviewSimulation jobId={jobId} />

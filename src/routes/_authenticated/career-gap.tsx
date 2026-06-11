@@ -255,7 +255,8 @@ function CareerGapPage() {
     <div style={{
       minHeight: "100vh", background: C.bg, color: C.text,
       fontFamily: "'Inter',-apple-system,sans-serif",
-      padding: "32px 24px 80px",    }}>
+      padding: "32px 24px 80px",
+    }}>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg) } }
         @keyframes fadeUp {
@@ -623,7 +624,7 @@ function CareerGapPage() {
               </div>
             </Card>
 
-            {/* Roadmap */}
+            {/* ── Roadmap ── */}
             <Card>
               <SectionLabel>Your learning roadmap</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -631,10 +632,22 @@ function CareerGapPage() {
                   const dm = DIFF_META[step.difficulty];
                   const isLast = i === result.roadmap.length - 1;
                   return (
-                    <div key={i} style={{ display: "flex", gap: 16, position: "relative" }}>
-
-                      {/* Left: step number + connector line */}
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                    <div
+                      key={i}
+                      style={{
+                        display: "grid",
+                        // Fixed 32px column for the step circle + connector, then content
+                        gridTemplateColumns: "32px 1fr",
+                        gap: "0 16px",
+                        position: "relative",
+                      }}
+                    >
+                      {/* Left column: circle + connector line */}
+                      <div style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                      }}>
                         <div style={{
                           width: 32, height: 32, borderRadius: "50%",
                           background: C.accentDim,
@@ -647,17 +660,22 @@ function CareerGapPage() {
                         </div>
                         {!isLast && (
                           <div style={{
-                            width: 1, flex: 1, background: C.border,
-                            marginTop: 6, marginBottom: 6, minHeight: 20,
+                            width: 1,
+                            flex: 1,
+                            background: C.border,
+                            marginTop: 6,
+                            marginBottom: 6,
+                            minHeight: 20,
                           }} />
                         )}
                       </div>
 
-                      {/* Right: content */}
+                      {/* Right column: content */}
                       <div style={{
-                        flex: 1,
                         paddingBottom: isLast ? 0 : 24,
                         paddingTop: 4,
+                        // Prevent content from overflowing into the step column
+                        minWidth: 0,
                       }}>
                         <div style={{
                           fontSize: 14, fontWeight: 600, color: C.text,

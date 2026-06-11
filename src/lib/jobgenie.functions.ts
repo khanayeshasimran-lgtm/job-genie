@@ -1454,3 +1454,96 @@ Return ONLY valid JSON:
       next_steps: string[];
     };
   });
+
+  // ---------- Voice Answer Analysis ----------
+export const analyzeVoiceAnswer = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({
+      job_id: z.string().uuid(),
+      question: z.string().min(5).max(500),
+      transcript: z.string().min(5).max(5000),
+      duration_seconds: z.number(),
+      filler_count: z.number(),        // counted client-side from transcript
+      word_count: z.number(),
+    }).parse(d)
+  )
+  .handler(async ({ data, context }) => {
+    const groqKey = process.env.GROQ_API_KEY;
+    if (!groqKey) throw new Error("GROQ_API_KEY missing");
+
+    const { data: job } = await context.supabase
+      .from("jobs")
+      .select("title, company, experience_level")
+      .eq("id", data.job_id)
+      .maybeSingle();
+
+    const wpm = data.duration_seconds > 0
+      ? Math.round((data.word_count / data.duration_seconds) * 60)
+      : 0;
+
+    const prompt = `You are an expert interview speech coach evaluating a spoken answer for "${job?.title ?? "the role"}" at ${job?.company ?? "the company"}.
+
+QUESTION: "${data.question}"
+SPOKEN ANSWER TRANSCRIPT: "${data.transcript}"
+
+SPEECH METRICS (computed from audio):
+- Speaking duration: ${data.duration_seconds}s
+- Words per minute: ${wpm} (ideal range: 120–160 WPM)
+- Filler words detected (um, uh, like, you know, so): ${data.filler_count}
+- Total words: ${data.word_count}
+
+Return ONLY valid JSON (no markdown):
+{
+  "confidence_score": <0-100>,
+  "clarity_score": <0-100>,
+  "pace_score": <0-100>,
+  "tone_score": <0-100>,
+  "overall_score": <0-100>,
+  "wpm": ${wpm},
+  "wpm_verdict": "<too slow / good pace / too fast>",
+  "filler_verdict": "<e.g. '3 fillers — acceptable' or '11 fillers — work on this'>",
+  "confidence_notes": "<1 sentence on what signals confidence or lack of it in their word choice>",
+  "tone_notes": "<1 sentence — enthusiastic / flat / nervous / assertive>",
+  "top_strength": "<most impressive thing about how they spoke>",
+  "top_fix": "<single most impactful thing to fix before the real interview>",
+  "improved_opening": "<rewrite just their first sentence to sound more confident and clear>"
+}
+
+Scoring:
+- confidence_score: strong declarative statements, ownership ("I built", "I led" vs "I think maybe I helped")
+- clarity_score: logical structure, no rambling, clear conclusion
+- pace_score: 100 = 130-160 WPM with natural pauses. Penalize <100 or >180 WPM
+- tone_score: professional enthusiasm, not monotone or overly nervous
+- overall_score: weighted average (confidence 30%, clarity 30%, pace 20%, tone 20%)`;
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        temperature: 0.3,
+        max_tokens: 700,
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!res.ok) throw new Error(`Groq error ${res.status}`);
+    const groqData = await res.json() as { choices: Array<{ message: { content: string } }> };
+    const raw = groqData.choices[0]?.message?.content ?? "{}";
+    return JSON.parse(raw) as {
+      confidence_score: number;
+      clarity_score: number;
+      pace_score: number;
+      tone_score: number;
+      overall_score: number;
+      wpm: number;
+      wpm_verdict: string;
+      filler_verdict: string;
+      confidence_notes: string;
+      tone_notes: string;
+      top_strength: string;
+      top_fix: string;
+      improved_opening: string;
+    };
+  });

@@ -337,7 +337,7 @@ padding: "32px 24px 80px",
         {/* Header */}
         <div style={{ marginBottom: 36 }}>
           <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: C.accent, marginBottom: 10 }}>
-            ✦ Auto-Apply Agent
+            ✦ OneClick-Apply Agent
           </div>
           <h1 style={{ fontSize: "clamp(1.8rem,3vw,2.5rem)", fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 8 }}>
             Your career agent
