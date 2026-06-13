@@ -255,7 +255,7 @@ function AgentPage() {
   const getQueueFn = useServerFn(getAgentQueue);
   const upsertFn = useServerFn(upsertApplication);
 
-  const [threshold, setThreshold] = useState(92);
+  const [threshold, setThreshold] = useState(70);
   const [lastResult, setLastResult] = useState<AgentResult | null>(null);
   const [applyingId, setApplyingId] = useState<string | null>(null);
 
@@ -279,7 +279,12 @@ function AgentPage() {
     },
     onError: (e) => {
       console.error("AGENT ERROR:", e);
-      toast.error((e as Error).message ?? "Unknown error");
+      const msg = (e as Error).message ?? "Unknown error";
+      if (msg.includes("resume") || msg.includes("profile")) {
+        toast.error("Complete your profile first — go to Profile and either upload your resume or fill in your skills & experience manually.");
+      } else {
+        toast.error(msg);
+      }
     },
   });
 

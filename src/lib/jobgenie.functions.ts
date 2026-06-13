@@ -116,6 +116,12 @@ const FiltersSchema = z.object({
 });
 export type Filters = z.infer<typeof FiltersSchema>;
 
+type ApplicationRow = {
+  job_id: string;
+  status: string;
+  ai_score: number | null;
+};
+
 export const listJobs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => FiltersSchema.parse(d ?? {}))
@@ -138,8 +144,8 @@ export const listJobs = createServerFn({ method: "POST" })
       .from("applications")
       .select("job_id,status,ai_score")
       .eq("user_id", context.userId);
-    const appsMap = new Map((apps ?? []).map((a) => [a.job_id, a]));
-    return (jobs ?? []).map((j) => ({ ...j, application: appsMap.get(j.id) ?? null }));
+    const appsMap = new Map((apps ?? []).map((a: ApplicationRow) => [a.job_id, a]));
+    return (jobs ?? []).map((j: Record<string, unknown>) => ({ ...j, application: appsMap.get(j.id as string) ?? null }));
   });
 
 export const getJob = createServerFn({ method: "POST" })
@@ -501,7 +507,7 @@ export const importAdzunaJobs = createServerFn({ method: "POST" })
 
     if (allJobs.length === 0) return { inserted: 0, skipped: 0, total_fetched: 0 };
 
-    const rows = allJobs.map((j) => {
+    const rows = allJobs.map((j: AdzunaJob) => {
       const isRemote = j.location.display_name.toLowerCase().includes("remote") || j.title.toLowerCase().includes("remote");
       const contractMap: Record<string, string> = { full_time: "full_time", part_time: "part_time", contract: "contract" };
       const employmentType = contractMap[j.contract_time ?? ""] ?? "full_time";
@@ -601,7 +607,7 @@ export const importJSearchJobs = createServerFn({ method: "POST" })
       CONTRACTOR: "contract",
     };
 
-    const rows = allJobs.map((j) => {
+    const rows = allJobs.map((j: JSearchJob) => {
       const titleLower = j.job_title.toLowerCase();
       let experienceLevel = "mid";
       if (titleLower.includes("senior") || titleLower.includes("lead") || titleLower.includes("principal"))
@@ -660,7 +666,7 @@ export const enhanceResume = createServerFn({ method: "POST" })
       .limit(50);
 
     const commonKeywords = [...new Set(
-      (jobs ?? []).flatMap((j) => [
+      (jobs ?? []).flatMap((j: { title: string; tags: string[] | null; requirements: string[] | null }) => [
         ...(j.tags as string[] ?? []),
         ...(j.requirements as string[] ?? []),
       ])
@@ -697,37 +703,50 @@ Be specific, honest, and actionable. No generic advice.`,
 function extractArray<T>(result: unknown): T[] {
   if (Array.isArray(result)) return result as T[];
   if (result && typeof result === "object") {
-    // Groq sometimes wraps: { "results": [...] } or { "jobs": [...] } or { "data": [...] }
     const val = Object.values(result as Record<string, unknown>).find((v) => Array.isArray(v));
     if (val) return val as T[];
   }
   return [];
 }
 
+type JobRow = {
+  id: string;
+  title: string;
+  company: string;
+  description: string | null;
+  requirements: string[] | null;
+  source_url: string | null;
+  [key: string]: unknown;
+};
+
 // ---------- Auto-Match Agent ----------
 export const runAutoMatch = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z.object({ threshold: z.number().min(50).max(100).default(92) }).parse(d ?? {})
+    z.object({ threshold: z.number().min(50).max(100).default(70) }).parse(d ?? {})
   )
   .handler(async ({ data, context }) => {
     const { aiJson } = await import("./ai-gateway.server");
 
-    // Fetch profile
     const { data: profile } = await context.supabase
       .from("profiles")
       .select("*")
       .eq("id", context.userId)
       .maybeSingle();
     if (!profile) throw new Error("Profile not found. Complete your profile first.");
-    if (!profile.resume_parsed) throw new Error("Parse your resume first so the agent knows your skills.");
+    // Allow manually-filled profiles too — only block if truly empty
+  const hasEnoughData =
+    profile.resume_parsed ||
+    (Array.isArray(profile.skills) && (profile.skills as string[]).length > 2) ||
+    (Array.isArray(profile.experience) && (profile.experience as unknown[]).length > 0);
+  if (!hasEnoughData)
+    throw new Error("Add your skills and experience to your profile first — the agent needs this data to score jobs.");
 
-    // Fetch jobs NOT yet in this user's applications
     const { data: existing } = await context.supabase
       .from("applications")
       .select("job_id")
       .eq("user_id", context.userId);
-    const existingIds = new Set((existing ?? []).map((a) => a.job_id));
+    const existingIds = new Set((existing ?? []).map((a: { job_id: string }) => a.job_id));
 
     const { data: jobs } = await context.supabase
       .from("jobs")
@@ -735,7 +754,7 @@ export const runAutoMatch = createServerFn({ method: "POST" })
       .order("posted_at", { ascending: false })
       .limit(200);
 
-    const unseen = (jobs ?? []).filter((j) => !existingIds.has(j.id));
+    const unseen = (jobs ?? [] as JobRow[]).filter((j: JobRow) => !existingIds.has(j.id));
     if (unseen.length === 0) return { scanned: 0, queued: 0, matches: [] };
 
     const profileSummary = `
@@ -748,7 +767,6 @@ Experience: ${JSON.stringify((profile.experience as unknown[]) ?? [])}
     type Match = { job_id: string; title: string; company: string; score: number; pitch: string; source_url: string };
     const matches: Match[] = [];
 
-    // Batch score — 4 at a time to stay within token/rate limits
     const BATCH = 4;
     for (let i = 0; i < unseen.length; i += BATCH) {
       const batch = unseen.slice(i, i + BATCH);
@@ -759,13 +777,14 @@ Experience: ${JSON.stringify((profile.experience as unknown[]) ?? [])}
           system: [
             "You are a career matching engine.",
             "Given a candidate profile and a list of jobs, score each job 0-100 for fit.",
-            "Return ONLY a raw JSON array — no wrapper object, no markdown, no explanation.",
-            'Example format: [{"job_id":"<uuid>","score":85},{"job_id":"<uuid>","score":42}]',
+"Return a JSON array of scoring results. No markdown, no explanation.",
+          'Format: [{"job_id":"<uuid>","score":85},{"job_id":"<uuid>","score":42}]',
+          "If you wrap in an object, use key \"matches\" or \"results\".",
             "Be strict — 90+ means near-perfect match.",
           ].join(" "),
           user: `CANDIDATE:\n${profileSummary}\n\nJOBS:\n${batch
             .map(
-              (j) =>
+              (j: JobRow) =>
                 `job_id: ${j.id}\ntitle: ${j.title}\ncompany: ${j.company}\ndesc: ${j.description?.slice(0, 400)}\nreqs: ${JSON.stringify(j.requirements ?? [])}`
             )
             .join("\n---\n")}`,
@@ -780,10 +799,9 @@ Experience: ${JSON.stringify((profile.experience as unknown[]) ?? [])}
         const job_id = item?.job_id;
         const score = item?.score;
         if (typeof score !== "number" || score < data.threshold) continue;
-        const job = batch.find((j) => j.id === job_id);
+        const job = batch.find((j: JobRow) => j.id === job_id);
         if (!job) continue;
 
-        // Generate pitch — isolated try/catch so one failure doesn't kill the whole batch
         let pitch = "";
         try {
           const pitchResult = await aiJson<{ pitch: string }>({
@@ -811,9 +829,8 @@ Experience: ${JSON.stringify((profile.experience as unknown[]) ?? [])}
       return { scanned: unseen.length, queued: 0, matches: [] };
     }
 
-    // Upsert all matches as auto_queued applications
     await (context.supabase.from("applications") as any).upsert(
-      matches.map((m) => ({
+      matches.map((m: Match) => ({
         user_id: context.userId,
         job_id: m.job_id,
         status: "saved",
@@ -824,11 +841,10 @@ Experience: ${JSON.stringify((profile.experience as unknown[]) ?? [])}
       { onConflict: "user_id,job_id" }
     );
 
-    // Single notification
     await context.supabase.from("notifications").insert({
       user_id: context.userId,
       title: `Agent found ${matches.length} high-match job${matches.length > 1 ? "s" : ""}`,
-      body: matches.map((m) => `${m.title} @ ${m.company} (${m.score}/100)`).join(" · "),
+      body: matches.map((m: Match) => `${m.title} @ ${m.company} (${m.score}/100)`).join(" · "),
       link: "/agent",
       kind: "agent",
     });
@@ -851,10 +867,6 @@ export const getAgentQueue = createServerFn({ method: "GET" })
     return (data ?? []) as Array<Record<string, any>>;
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-// ADD THESE TO THE BOTTOM OF src/lib/jobgenie.functions.ts
-// ─────────────────────────────────────────────────────────────────────────────
-
 // ---------- Get job + application + profile for Prep page ----------
 export const getPrepData = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -873,7 +885,6 @@ export const getPrepData = createServerFn({ method: "POST" })
       .eq("job_id", data.job_id)
       .maybeSingle();
 
-    // Load saved prep content if it exists (stored in notes with title = "__prep__")
     const { data: prepNote } = await context.supabase
       .from("notes")
       .select("*")
@@ -882,29 +893,29 @@ export const getPrepData = createServerFn({ method: "POST" })
       .eq("title", "__prep__")
       .maybeSingle();
 
-let prepContent: PrepContent | null = null;
+    let prepContent: PrepContent | null = null;
     if (prepNote?.body) {
       try {
         prepContent = JSON.parse(prepNote.body) as PrepContent;
-        const asText = (v: any): string =>
-          typeof v === "string" ? v : v?.description ?? v?.task ?? (v ? JSON.stringify(v) : "");
+        const asText = (v: unknown): string =>
+          typeof v === "string" ? v : (v as any)?.description ?? (v as any)?.task ?? (v ? JSON.stringify(v) : "");
         if (prepContent) {
           prepContent.company_overview = asText(prepContent.company_overview);
           prepContent.culture_notes = asText(prepContent.culture_notes);
           if (Array.isArray(prepContent.doc_checklist)) {
-            prepContent.doc_checklist = prepContent.doc_checklist.map((item: any) =>
+            prepContent.doc_checklist = prepContent.doc_checklist.map((item: unknown) =>
               typeof item === "string"
                 ? item
-                : item?.task
-                ? (item.description ? `${item.task} — ${item.description}` : item.task)
-                : item?.description ?? JSON.stringify(item)
+                : (item as any)?.task
+                ? ((item as any).description ? `${(item as any).task} — ${(item as any).description}` : (item as any).task)
+                : (item as any)?.description ?? JSON.stringify(item)
             );
           }
           if (Array.isArray(prepContent.questions)) {
-            prepContent.questions = prepContent.questions.map((q: any) => ({
-              category: asText(q.category),
-              question: asText(q.question),
-              hint: asText(q.hint),
+            prepContent.questions = prepContent.questions.map((q: unknown) => ({
+              category: asText((q as any).category),
+              question: asText((q as any).question),
+              hint: asText((q as any).hint),
             }));
           }
         }
@@ -935,7 +946,6 @@ export const generatePrepContent = createServerFn({ method: "POST" })
     ]);
     if (!job) throw new Error("Job not found");
 
-    // Call Groq directly (fast inference)
     const groqKey = process.env.GROQ_API_KEY;
     if (!groqKey) throw new Error("GROQ_API_KEY missing");
 
@@ -1001,27 +1011,25 @@ Rules:
       choices: Array<{ message: { content: string } }>;
     };
 
-const raw = groqData.choices[0]?.message?.content ?? "{}";
-const parsed = JSON.parse(raw) as PrepContent;
+    const raw = groqData.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(raw) as PrepContent;
 
-if (Array.isArray(parsed.doc_checklist)) {
-  parsed.doc_checklist = parsed.doc_checklist.map((item: any) =>
-    typeof item === "string"
-      ? item
-      : item?.task
-      ? (item.description ? `${item.task} — ${item.description}` : item.task)
-      : item?.description ?? JSON.stringify(item)
-  );
-}
+    if (Array.isArray(parsed.doc_checklist)) {
+      parsed.doc_checklist = parsed.doc_checklist.map((item: unknown) =>
+        typeof item === "string"
+          ? item
+          : (item as any)?.task
+          ? ((item as any).description ? `${(item as any).task} — ${(item as any).description}` : (item as any).task)
+          : (item as any)?.description ?? JSON.stringify(item)
+      );
+    }
 
-const asText = (v: any): string =>
-  typeof v === "string" ? v : v?.description ?? v?.task ?? (v ? JSON.stringify(v) : "");
-parsed.company_overview = asText(parsed.company_overview);
-parsed.culture_notes = asText(parsed.culture_notes);
+    const asText = (v: unknown): string =>
+      typeof v === "string" ? v : (v as any)?.description ?? (v as any)?.task ?? (v ? JSON.stringify(v) : "");
+    parsed.company_overview = asText(parsed.company_overview);
+    parsed.culture_notes = asText(parsed.culture_notes);
+    parsed.generated_at = new Date().toISOString();
 
-parsed.generated_at = new Date().toISOString();
-
-    // Persist to notes table so it survives page refreshes
     const { data: application } = await context.supabase
       .from("applications")
       .select("id")
@@ -1030,7 +1038,6 @@ parsed.generated_at = new Date().toISOString();
       .maybeSingle();
 
     if (application?.id) {
-      // Upsert: delete old prep note then insert fresh one
       await context.supabase
         .from("notes")
         .delete()
@@ -1049,7 +1056,13 @@ parsed.generated_at = new Date().toISOString();
     return parsed;
   });
 
-  // ---------- AI Career Gap Analyzer ----------
+// ─────────────────────────────────────────────────────────────────────────────
+// PASTE THIS into jobgenie.functions.ts — REPLACE the entire analyzeCareerGap
+// server function. It uses Groq directly (same as generatePrepContent,
+// interviewAsk, etc.) instead of aiJson/ai-gateway.server which crashes the
+// career-gap route on load.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const analyzeCareerGap = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -1059,9 +1072,96 @@ export const analyzeCareerGap = createServerFn({ method: "POST" })
     }).parse(d)
   )
   .handler(async ({ data }) => {
-    const { aiJson } = await import("./ai-gateway.server");
+    const groqKey = process.env.GROQ_API_KEY;
+    if (!groqKey) throw new Error("GROQ_API_KEY missing");
 
-    const result = await aiJson<{
+    const prompt = `You are a career gap analyst. Analyse the resume against the target role and return ONLY valid JSON (no markdown, no backticks, no explanation).
+
+TARGET ROLE: ${data.target_role}
+
+RESUME:
+${data.text.slice(0, 8000)}
+
+Return this exact JSON shape:
+{
+  "score": <integer 0-100, current match %>,
+  "target_score": <integer, projected match % after completing roadmap, always higher than score>,
+  "headline": "You qualify for X% of ${data.target_role} roles",
+  "summary": "<2 sentences — what's strong, what's the biggest gap>",
+  "skill_breakdown": [
+    { "name": "<skill>", "pct": <0-100>, "status": "strong" | "partial" | "missing" }
+  ],
+  "missing_skills": ["<skill1>", "<skill2>", "<skill3>", "<skill4>", "<skill5>"],
+  "hire_probability": <integer 0-100>,
+  "hire_probability_after": <integer, after completing roadmap>,
+  "hire_note": "Add [top skill] → jumps to X%",
+  "salary_now": "<estimated current salary e.g. ₹8,00,000>",
+  "salary_after": "<estimated salary after roadmap>",
+  "salary_increase_pct": <integer>,
+  "roadmap": [
+    {
+      "step": 1,
+      "title": "<what to learn>",
+      "resources": "<specific course/site names>",
+      "duration": "<N weeks>",
+      "difficulty": "Easy" | "Medium" | "Hard"
+    }
+  ]
+}
+
+Rules:
+- skill_breakdown: exactly 6 skills critical for ${data.target_role}
+- missing_skills: 5-7 specific missing keywords/tools
+- roadmap: exactly 4 steps
+- salary in Indian Rupees (₹) format since this is India-focused
+- Be specific to the actual resume content, not generic`;
+
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${groqKey}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        temperature: 0.3,
+        max_tokens: 2000,
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Analysis failed (${res.status}): ${err.slice(0, 200)}`);
+    }
+
+    const groqData = await res.json() as {
+      choices: Array<{ message: { content: string } }>;
+    };
+
+    const raw = groqData.choices[0]?.message?.content ?? "{}";
+    
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error("AI returned malformed JSON. Please try again.");
+    }
+
+    // Ensure arrays exist to prevent frontend crashes
+    parsed.skill_breakdown = Array.isArray(parsed.skill_breakdown) ? parsed.skill_breakdown : [];
+    parsed.missing_skills = Array.isArray(parsed.missing_skills) ? parsed.missing_skills : [];
+    parsed.roadmap = Array.isArray(parsed.roadmap) ? parsed.roadmap : [];
+    
+    // Clamp numbers
+    parsed.score = Math.min(100, Math.max(0, Number(parsed.score) || 0));
+    parsed.target_score = Math.min(100, Math.max(parsed.score, Number(parsed.target_score) || parsed.score + 15));
+    parsed.hire_probability = Math.min(100, Math.max(0, Number(parsed.hire_probability) || 0));
+    parsed.hire_probability_after = Math.min(100, Math.max(parsed.hire_probability, Number(parsed.hire_probability_after) || parsed.hire_probability + 10));
+    parsed.salary_increase_pct = Number(parsed.salary_increase_pct) || 0;
+
+    return parsed as {
       score: number;
       target_score: number;
       headline: string;
@@ -1081,30 +1181,10 @@ export const analyzeCareerGap = createServerFn({ method: "POST" })
         duration: string;
         difficulty: "Easy" | "Medium" | "Hard";
       }>;
-    }>({
-      system: `You are a career gap analyst. Analyse the resume against the target role and return JSON with:
-- score: integer 0–100 (current match %)
-- target_score: integer (projected match % after completing roadmap, always higher than score)
-- headline: "You qualify for X% of [role] roles" (1 sentence)
-- summary: 2 sentences — what's strong, what's the biggest gap
-- skill_breakdown: 6 skills critical for this role, each with name, pct (0–100), status ("strong"/"partial"/"missing")
-- missing_skills: 5–7 specific missing keywords/tools
-- hire_probability: integer 0–100 (realistic hiring chance today)
-- hire_probability_after: integer (after roadmap)
-- hire_note: "Add [top skill] → jumps to X%" (1 line)
-- salary_now: estimated current salary for this role given candidate level (e.g. "$52,000")
-- salary_after: estimated salary after completing roadmap
-- salary_increase_pct: integer
-- roadmap: exactly 4 steps, each { step, title, resources (specific course/site names), duration ("N weeks"), difficulty }
-Be specific to the exact resume content. No generic advice. Use real salary data for the target role.`,
-      user: `TARGET ROLE: ${data.target_role}\n\nRESUME:\n${data.text}`,
-    });
-
-    return result;
+    };
   });
 
-  // ---------- AI Hiring Explainability ----------
-// Returns per-skill contribution to the match score — the "why 87%?" breakdown.
+// ---------- AI Hiring Explainability ----------
 export const explainScore = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ job_id: z.string().uuid() }).parse(d))
@@ -1123,15 +1203,15 @@ export const explainScore = createServerFn({ method: "POST" })
       verdict: string;
       skill_contributions: Array<{
         skill: string;
-        delta: number;        // positive = boosts score, negative = drags it
-        present: boolean;     // true = candidate has it, false = missing
-        weight: "high" | "medium" | "low"; // importance to this specific role
-        note: string;         // 1 short sentence — what the recruiter sees
+        delta: number;
+        present: boolean;
+        weight: "high" | "medium" | "low";
+        note: string;
       }>;
-      top_boosts: string[];   // 3 skills/traits that most helped the score
-      top_gaps: string[];     // 3 specific missing skills/traits
+      top_boosts: string[];
+      top_gaps: string[];
       hiring_likelihood: "very_high" | "high" | "medium" | "low";
-      likelihood_reason: string; // 1 sentence
+      likelihood_reason: string;
     }>({
       system: `You are an AI hiring explainability engine. Your job is to explain WHY a candidate scores the way they do against a job description — like a recruiter's internal notes made transparent.
 
@@ -1166,7 +1246,6 @@ Experience: ${JSON.stringify((profile.experience as unknown[]) ?? []).slice(0, 1
 Education: ${JSON.stringify((profile.education as unknown[]) ?? [])}`,
     });
 
-    // Persist to applications table for caching (best-effort)
     await context.supabase
       .from("applications")
       .upsert(
@@ -1182,7 +1261,7 @@ Education: ${JSON.stringify((profile.education as unknown[]) ?? [])}`,
     return result;
   });
 
-  // ---------- Explain match score (Groq) ----------
+// ---------- Explain match score (Groq) ----------
 export const explainMatchScore = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -1239,11 +1318,6 @@ Make the factors realistic for this job title and score. 4-6 factors total (mix 
     return JSON.parse(raw) as { summary: string; factors: Array<{ skill: string; delta: number; reason: string }>; verdict: string };
   });
 
-
-  // ─────────────────────────────────────────────────────────────────────────────
-// Add to src/lib/jobgenie.functions.ts
-// ─────────────────────────────────────────────────────────────────────────────
-
 // ---------- Interview Simulation — ask next question ----------
 export const interviewAsk = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1251,7 +1325,6 @@ export const interviewAsk = createServerFn({ method: "POST" })
     z
       .object({
         job_id: z.string().uuid(),
-        // Full transcript so far: [{role: "interviewer"|"candidate", text: "..."}]
         transcript: z
           .array(z.object({ role: z.enum(["interviewer", "candidate"]), text: z.string() }))
           .default([]),
@@ -1267,8 +1340,6 @@ export const interviewAsk = createServerFn({ method: "POST" })
       context.supabase.from("profiles").select("headline,skills,experience").eq("id", context.userId).maybeSingle(),
     ]);
     if (!job) throw new Error("Job not found");
-
-    const isFirst = data.transcript.length === 0;
 
     const systemPrompt = `You are a professional technical interviewer at ${job.company} hiring for "${job.title}" (${job.experience_level ?? "mid"} level).
 Job description excerpt: ${(job.description ?? "").slice(0, 600)}
@@ -1286,12 +1357,10 @@ Rules:
 - Vary the category each turn.
 - On turn 7+, wrap up politely: "That's all from my end. Thank you for your time, [first word of headline or 'candidate']!"`;
 
-    const messages = [
-      ...data.transcript.map((t) => ({
-        role: t.role === "interviewer" ? "assistant" : "user",
-        content: t.text,
-      })),
-    ];
+    const messages = data.transcript.map((t: { role: "interviewer" | "candidate"; text: string }) => ({
+      role: t.role === "interviewer" ? "assistant" : "user",
+      content: t.text,
+    }));
 
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -1379,6 +1448,15 @@ Be honest and specific. No generic feedback like "be more specific" — name wha
     };
   });
 
+type EvaluationEntry = {
+  question: string;
+  answer: string;
+  confidence_score: number;
+  technical_score: number;
+  communication_score: number;
+  overall_score: number;
+};
+
 // ---------- Interview Simulation — final session debrief ----------
 export const interviewDebrief = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1409,9 +1487,9 @@ export const interviewDebrief = createServerFn({ method: "POST" })
       .eq("id", data.job_id)
       .maybeSingle();
 
-    const avgScore = (key: keyof (typeof data.evaluations)[0]) =>
+    const avgScore = (key: keyof EvaluationEntry) =>
       Math.round(
-        data.evaluations.reduce((s, e) => s + (e[key] as number), 0) / (data.evaluations.length || 1),
+        data.evaluations.reduce((s: number, e: EvaluationEntry) => s + (e[key] as number), 0) / (data.evaluations.length || 1),
       );
 
     const prompt = `You are a career coach debriefing a mock interview for "${job?.title ?? "the role"}" at ${job?.company ?? "the company"}.
@@ -1455,7 +1533,7 @@ Return ONLY valid JSON:
     };
   });
 
-  // ---------- Voice Answer Analysis ----------
+// ---------- Voice Answer Analysis ----------
 export const analyzeVoiceAnswer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -1464,7 +1542,7 @@ export const analyzeVoiceAnswer = createServerFn({ method: "POST" })
       question: z.string().min(5).max(500),
       transcript: z.string().min(5).max(5000),
       duration_seconds: z.number(),
-      filler_count: z.number(),        // counted client-side from transcript
+      filler_count: z.number(),
       word_count: z.number(),
     }).parse(d)
   )

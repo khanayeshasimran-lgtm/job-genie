@@ -331,7 +331,9 @@ function JobCard({ job, onApply, applying }: {
           // Already progressed — go to applications
           <Link
             to="/applications"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
+  e.stopPropagation();
+}}
             style={{
               fontSize: 12, fontWeight: 600, color: C.text2,
               background: C.bg3, border: `1px solid ${C.border2}`,
@@ -347,7 +349,11 @@ function JobCard({ job, onApply, applying }: {
           </Link>
         ) : (
           <button
-            onClick={(e) => { e.stopPropagation(); onApply(job.id, job.source_url); }}
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+  e.stopPropagation();
+  onApply(job.id, job.source_url);
+}}
+
             disabled={applying}
             style={{
               fontSize: 12, fontWeight: 700, color: "#000",
@@ -438,8 +444,8 @@ function JobsPage() {
     if (!jobs) return null;
     return {
       total:   jobs.length,
-      remote:  jobs.filter((j) => j.remote).length,
-      applied: jobs.filter((j) => j.application).length,
+      remote: jobs.filter((j: any) => j.remote).length,
+      applied: jobs.filter((j: any) => j.application).length,
     };
   }, [jobs]);
 
@@ -634,7 +640,7 @@ function JobsPage() {
           </div>
         ) : (
           <div className="jobs-grid">
-            {jobs!.map((j) => (
+            {jobs!.map((j: any) => (
               <JobCard
                 key={j.id}
                 job={j}

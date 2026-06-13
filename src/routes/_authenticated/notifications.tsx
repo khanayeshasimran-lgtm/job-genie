@@ -35,7 +35,7 @@ function NotificationsPage() {
 
   useEffect(() => { mark.mutate(); }, []);
 
-  const unread = (items ?? []).filter((n) => !n.read).length;
+  const unread = (items ?? []).filter((n: any) => !n.read).length;
 
   return (
     <div style={{
@@ -68,7 +68,7 @@ function NotificationsPage() {
 
       {/* List */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items?.map((n) => (
+        {items?.map((n: any) => (
           <div key={n.id} style={{
             background: C.bg2,
             border: `1px solid ${n.read ? C.border : "rgba(245,155,0,0.22)"}`,

@@ -28,6 +28,23 @@ const C = {
   teal:    "#14B8A6",
 };
 
+// ── Job type ──────────────────────────────────────────────────────────────────
+interface Job {
+  id: string;
+  title: string;
+  company: string;
+  location?: string | null;
+  remote?: boolean | null;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  currency?: string | null;
+  posted_at?: string | null;
+  employment_type?: string | null;
+  experience_level?: string | null;
+  tags?: string[] | null;
+  application?: any;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function timeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
@@ -66,7 +83,7 @@ function matchScore(id: string): number {
 }
 
 // Why-Genie-picked reasons (derived from job data)
-function genieReasons(j: any): string[] {
+function genieReasons(j: Job): string[] {
   const reasons: string[] = [];
   const tags = (j.tags as string[] | null) ?? [];
   if (tags.length >= 2) reasons.push(`Matches ${tags.length} skills in your profile`);
@@ -119,10 +136,10 @@ function CompanyLogo({ company, size = 36 }: { company: string; size?: number })
 }
 
 // ── Opportunity Card ──────────────────────────────────────────────────────────
-function OpportunityCard({ job, rank }: { job: any; rank?: number }) {
+function OpportunityCard({ job, rank }: { job: Job; rank?: number }) {
   const navigate = useNavigate();
   const score   = matchScore(job.id);
-  const salary  = formatSalary(job.salary_min, job.salary_max, job.currency);
+  const salary  = formatSalary(job.salary_min ?? null, job.salary_max ?? null, job.currency ?? null);
   const posted  = timeAgo(job.posted_at);
   const fresh   = isRecent(job.posted_at);
   const reasons = genieReasons(job);
@@ -276,7 +293,7 @@ function OpportunityCard({ job, rank }: { job: any; rank?: number }) {
           🧞 WHY GENIE PICKED THIS
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-          {reasons.map((r, i) => (
+          {reasons.map((r: string, i: number) => (
             <div key={i} style={{ fontSize: 11, color: C.text2, display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ color: C.green, fontSize: 10 }}>✓</span>
               {r}
@@ -303,7 +320,6 @@ function OpportunityCard({ job, rank }: { job: any; rank?: number }) {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              // opens GenieChat context - for now navigate to job detail
               navigate({ to: "/jobs/$id", params: { id: job.id } });
             }}
             style={{
@@ -322,7 +338,7 @@ function OpportunityCard({ job, rank }: { job: any; rank?: number }) {
           <Link
             to="/jobs/$id"
             params={{ id: job.id }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e: any) => e.stopPropagation()}
             style={{
               fontSize: 11, fontWeight: 700, color: "#000",
               background: `linear-gradient(135deg, ${C.accent} 0%, ${C.accent2} 100%)`,
@@ -375,33 +391,33 @@ function OpportunitiesPage() {
     queryFn: () => fn({ data: {} }),
   });
 
-  const fresh = useMemo(() => (jobs ?? []).filter((j) => !j.application), [jobs]);
+  const fresh = useMemo(() => (jobs ?? []).filter((j: Job) => !j.application), [jobs]);
 
   // Sections
-  const topMatches   = useMemo(() => [...fresh].sort((a, b) => matchScore(b.id) - matchScore(a.id)).slice(0, 6), [fresh]);
-  const recentlyPosted = useMemo(() => fresh.filter((j) => isRecent(j.posted_at)).slice(0, 4), [fresh]);
-  const highSalary   = useMemo(() => fresh.filter((j) => j.salary_max && j.salary_max > 1500000).slice(0, 4), [fresh]);
-  const hiddenGems   = useMemo(() => {
+  const topMatches     = useMemo(() => [...fresh].sort((a: Job, b: Job) => matchScore(b.id) - matchScore(a.id)).slice(0, 6), [fresh]);
+  const recentlyPosted = useMemo(() => fresh.filter((j: Job) => isRecent(j.posted_at)).slice(0, 4), [fresh]);
+  const highSalary     = useMemo(() => fresh.filter((j: Job) => j.salary_max && j.salary_max > 1500000).slice(0, 4), [fresh]);
+  const hiddenGems     = useMemo(() => {
     const bigCos = new Set(["google","microsoft","amazon","meta","apple","adobe","mastercard"]);
-    return fresh.filter((j) => !bigCos.has(j.company.toLowerCase()) && matchScore(j.id) >= 80).slice(0, 4);
+    return fresh.filter((j: Job) => !bigCos.has(j.company.toLowerCase()) && matchScore(j.id) >= 80).slice(0, 4);
   }, [fresh]);
 
   // Insights
   const insights = useMemo(() => ({
     total:     fresh.length,
-    highMatch: fresh.filter((j) => matchScore(j.id) >= 90).length,
-    remote:    fresh.filter((j) => j.remote).length,
-    todayNew:  fresh.filter((j) => isRecent(j.posted_at)).length,
+    highMatch: fresh.filter((j: Job) => matchScore(j.id) >= 90).length,
+    remote:    fresh.filter((j: Job) => j.remote).length,
+    todayNew:  fresh.filter((j: Job) => isRecent(j.posted_at)).length,
   }), [fresh]);
 
   const avgMatch = useMemo(() => {
     if (!fresh.length) return 0;
-    return Math.round(fresh.reduce((s, j) => s + matchScore(j.id), 0) / fresh.length);
+    return Math.round(fresh.reduce((s: number, j: Job) => s + matchScore(j.id), 0) / fresh.length);
   }, [fresh]);
 
   const skeletonGrid = (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-      {Array.from({ length: 4 }).map((_, i) => (
+      {Array.from({ length: 4 }).map((_, i: number) => (
         <div key={i} style={{
           background: C.bg2, border: `1px solid ${C.border}`,
           borderRadius: 14, height: 240,
@@ -499,7 +515,7 @@ function OpportunitiesPage() {
           />
           {isLoading ? skeletonGrid : (
             <div className="opp-grid">
-              {topMatches.map((j, i) => <OpportunityCard key={j.id} job={j} rank={i + 1} />)}
+              {topMatches.map((j: Job, i: number) => <OpportunityCard key={j.id} job={j} rank={i + 1} />)}
             </div>
           )}
         </div>
@@ -515,7 +531,7 @@ function OpportunitiesPage() {
             />
             {isLoading ? skeletonGrid : (
               <div className="opp-grid">
-                {recentlyPosted.map((j) => <OpportunityCard key={j.id} job={j} />)}
+                {recentlyPosted.map((j: Job) => <OpportunityCard key={j.id} job={j} />)}
               </div>
             )}
           </div>
@@ -532,7 +548,7 @@ function OpportunitiesPage() {
             />
             {isLoading ? skeletonGrid : (
               <div className="opp-grid">
-                {highSalary.map((j) => <OpportunityCard key={j.id} job={j} />)}
+                {highSalary.map((j: Job) => <OpportunityCard key={j.id} job={j} />)}
               </div>
             )}
           </div>
@@ -549,7 +565,7 @@ function OpportunitiesPage() {
             />
             {isLoading ? skeletonGrid : (
               <div className="opp-grid">
-                {hiddenGems.map((j) => <OpportunityCard key={j.id} job={j} />)}
+                {hiddenGems.map((j: Job) => <OpportunityCard key={j.id} job={j} />)}
               </div>
             )}
           </div>

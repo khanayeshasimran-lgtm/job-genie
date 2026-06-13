@@ -812,7 +812,7 @@ function ChecklistPanel({ applicationId }: { applicationId: string }) {
         </button>
       </form>
       <ul style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items?.map((c) => (
+        {items?.map((c: any) => (
           <li key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
             <div
               onClick={async () => { await toggleFn({ data: { id: c.id, done: !c.done } }); inv(); }}
@@ -877,7 +877,7 @@ function NotesPanel({ applicationId }: { applicationId: string }) {
         </button>
       </form>
       <ul style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {notes?.map((n) => (
+        {notes?.map((n: any) => (
           <li key={n.id} style={{ fontSize: 13, borderLeft: `2px solid rgba(245,155,0,0.4)`, paddingLeft: 12, position: "relative" }}>
             <p style={{ color: C.text2, whiteSpace: "pre-wrap", marginBottom: 6 }}>{n.body}</p>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

@@ -156,13 +156,13 @@ function BtnPrimary({
         transition: "background .2s",
         ...style,
       }}
-      onMouseEnter={(e) => {
+      onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
         if (!disabled && !loading)
-          (e.currentTarget as HTMLButtonElement).style.background = C.accent2;
+          e.currentTarget.style.background = C.accent2;
       }}
-      onMouseLeave={(e) => {
+      onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
         if (!disabled && !loading)
-          (e.currentTarget as HTMLButtonElement).style.background = C.accent;
+          e.currentTarget.style.background = C.accent;
       }}
     >
       {loading ? <Spinner /> : null}
@@ -204,6 +204,13 @@ function SkeletonBlock({ height = 80 }: { height?: number }) {
       <style>{`@keyframes shimmer { to { background-position: -200% 0; } }`}</style>
     </div>
   );
+}
+
+// ── Checklist item type ───────────────────────────────────────────────────────
+interface ChecklistItem {
+  id: string;
+  label: string;
+  done: boolean;
 }
 
 // ── Accordion question card ───────────────────────────────────────────────────
@@ -382,7 +389,8 @@ function PrepChecklist({
   const { data: items, isSuccess } = useQuery({
     queryKey: qKey,
     queryFn: () => listFn({ data: { application_id: applicationId } }),
-    select: (rows) => rows.filter((r) => r.label.startsWith(`[${title}] `)),
+    select: (rows: ChecklistItem[]) =>
+      rows.filter((r: ChecklistItem) => r.label.startsWith(`[${title}] `)),
   });
 
   const inv = () => qc.invalidateQueries({ queryKey: qKey });
@@ -407,7 +415,8 @@ function PrepChecklist({
     setSeeding(true);
     try {
       for (const raw of aiItems) {
-        const item = typeof raw === "string" ? raw : (raw as any).task ?? JSON.stringify(raw);
+        const item =
+          typeof raw === "string" ? raw : (raw as { task?: string }).task ?? JSON.stringify(raw);
         await addFn({
           data: { application_id: applicationId, label: `[${title}] ${item}` },
         });
@@ -421,7 +430,7 @@ function PrepChecklist({
 
   const displayLabel = (l: string) => l.replace(`[${title}] `, "");
 
-  const done = items?.filter((i) => i.done).length ?? 0;
+  const done = items?.filter((i: ChecklistItem) => i.done).length ?? 0;
   const total = items?.length ?? 0;
 
   return (
@@ -496,8 +505,8 @@ function PrepChecklist({
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         <input
           value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          onKeyDown={async (e) => {
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLabel(e.target.value)}
+          onKeyDown={async (e: React.KeyboardEvent<HTMLInputElement>) => {
             if (e.key !== "Enter" || !label.trim()) return;
             e.preventDefault();
             await addFn({
@@ -521,8 +530,12 @@ function PrepChecklist({
             outline: "none",
             fontFamily: "inherit",
           }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(245,155,0,0.5)")}
-          onBlur={(e) => (e.currentTarget.style.borderColor = C.border2)}
+          onFocus={(e: React.FocusEvent<HTMLInputElement>) =>
+            (e.currentTarget.style.borderColor = "rgba(245,155,0,0.5)")
+          }
+          onBlur={(e: React.FocusEvent<HTMLInputElement>) =>
+            (e.currentTarget.style.borderColor = C.border2)
+          }
         />
         <button
           onClick={async () => {
@@ -558,7 +571,7 @@ function PrepChecklist({
 
       {/* Items */}
       <ul style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items?.map((c) => (
+        {items?.map((c: ChecklistItem) => (
           <li
             key={c.id}
             style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}
@@ -617,8 +630,12 @@ function PrepChecklist({
                 opacity: 0,
                 transition: "opacity .15s",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-              onMouseLeave={(e) => (e.currentTarget.style.opacity = "0")}
+              onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) =>
+                (e.currentTarget.style.opacity = "1")
+              }
+              onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) =>
+                (e.currentTarget.style.opacity = "0")
+              }
             >
               <svg
                 width="12"
@@ -659,7 +676,7 @@ function PrepPage() {
       toast.success("Prep content generated");
       qc.invalidateQueries({ queryKey: ["prep", jobId] });
     },
-    onError: (e) => toast.error((e as Error).message),
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const job = data?.job;
@@ -814,7 +831,7 @@ function PrepPage() {
                 <div style={{ flex: 1 }}>
                   <SectionLabel>Why you fit</SectionLabel>
                   <ul style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {(application!.ai_match_reasons as string[]).map((r, i) => (
+                    {(application!.ai_match_reasons as string[]).map((r: string, i: number) => (
                       <li key={i} style={{ fontSize: 12, color: C.text2, display: "flex", gap: 6 }}>
                         <span style={{ color: C.green }}>●</span> {r}
                       </li>
@@ -850,7 +867,7 @@ function PrepPage() {
             <Panel>
               <SectionLabel>Mock interview questions</SectionLabel>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {[1, 2, 3, 4].map((i) => <SkeletonBlock key={i} height={48} />)}
+                {[1, 2, 3, 4].map((i: number) => <SkeletonBlock key={i} height={48} />)}
               </div>
             </Panel>
           </div>
@@ -873,28 +890,29 @@ function PrepPage() {
         )}
 
         {/* ── 3. Mock interview questions ── */}
-{prep && (
-  <Panel style={{ marginBottom: 16 }}>
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
-      <AccentLabel>✦ Mock interview questions</AccentLabel>
-      <div style={{ display: "flex", gap: 8 }}>
-        {Object.entries(CATEGORY_COLORS).map(([cat, colors]) => (
-          <span key={cat} style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: colors.bg, color: colors.text, letterSpacing: "0.05em" }}>
-            {cat}
-          </span>
-        ))}
-      </div>
-    </div>
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {prep.questions.map((q, i) => (
-        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <QuestionCard q={q} index={i} />
-          <VoiceAnswerCoach jobId={jobId} question={q.question} />
-        </div>
-      ))}
-    </div>
-  </Panel>
-)}
+        {prep && (
+          <Panel style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+              <AccentLabel>✦ Mock interview questions</AccentLabel>
+              <div style={{ display: "flex", gap: 8 }}>
+                {Object.entries(CATEGORY_COLORS).map(([cat, colors]: [string, { text: string; bg: string }]) => (
+                  <span key={cat} style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: colors.bg, color: colors.text, letterSpacing: "0.05em" }}>
+                    {cat}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {prep.questions.map((q: PrepContent["questions"][number], i: number) => (
+                <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <QuestionCard q={q} index={i} />
+                  <VoiceAnswerCoach jobId={jobId} question={q.question} />
+                </div>
+              ))}
+            </div>
+          </Panel>
+        )}
+
         {/* ── 4. Interview simulation ── */}
         {application?.id && (
           <InterviewSimulation jobId={jobId} />

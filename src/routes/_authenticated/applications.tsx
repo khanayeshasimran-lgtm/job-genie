@@ -4,6 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { listApplications, upsertApplication } from "@/lib/jobgenie.functions";
 import { toast } from "sonner";
 import { useState, useEffect, useMemo } from "react";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 export const Route = createFileRoute("/_authenticated/applications")({
   component: AppsPage,
@@ -40,129 +42,273 @@ const STAGE_META: Record<Stage, { label: string; color: string; emoji: string; b
   declined:     { label: "Declined",     color: C.text3,   emoji: "🚫", bg: "rgba(255,255,255,0.04)" },
 };
 
-// ── Modals ────────────────────────────────────────────────────────────────────
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const modalBox: React.CSSProperties = {
+  position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+  zIndex: 101, background: C.bg2, border: `1px solid ${C.border2}`,
+  borderRadius: 20, width: "min(460px, calc(100vw - 32px))",
+  maxHeight: "90vh", overflowY: "auto",
+  boxSizing: "border-box", boxShadow: "0 40px 100px rgba(0,0,0,0.8)",
+};
+
+const inputStyle: React.CSSProperties = {
+  background: "transparent", border: "none",
+  color: C.text, fontSize: 13, fontFamily: "inherit",
+  outline: "none", width: "100%", padding: 0,
+};
+
+const fieldBox: React.CSSProperties = {
+  background: C.bg3, border: `1px solid ${C.border2}`,
+  borderRadius: 10, padding: "10px 13px",
+  display: "flex", alignItems: "center", gap: 9,
+};
+
+const labelStyle: React.CSSProperties = {
+  fontSize: 10, fontWeight: 700, letterSpacing: "0.12em",
+  textTransform: "uppercase", color: C.text3, marginBottom: 8,
+  display: "block",
+};
+
+// ── Backdrop ──────────────────────────────────────────────────────────────────
 function Backdrop({ onClose }: { onClose: () => void }) {
   return (
     <div onClick={onClose} style={{
       position: "fixed", inset: 0,
-      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)", zIndex: 100,
+      background: "rgba(0,0,0,0.8)", backdropFilter: "blur(6px)", zIndex: 100,
     }} />
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: C.text2 }}>
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  background: C.bg, border: `1px solid ${C.border2}`, borderRadius: 8,
-  color: C.text, fontSize: 13, padding: "9px 12px", fontFamily: "inherit",
-  outline: "none", width: "100%", boxSizing: "border-box", transition: "border-color .15s",
-};
-
-const modalBox: React.CSSProperties = {
-  position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
-  zIndex: 101, background: C.bg2, border: `1px solid ${C.border2}`,
-  borderRadius: 16, padding: 28, width: "min(440px, calc(100vw - 32px))",
-  boxSizing: "border-box", boxShadow: "0 24px 64px rgba(0,0,0,0.65)",
-};
-
+// ── InterviewModal ────────────────────────────────────────────────────────────
 interface InterviewFields { date: string; time: string; type: "online"|"onsite"|"phone"; link: string; }
+
+const TYPE_OPTIONS: { value: InterviewFields["type"]; label: string; icon: string }[] = [
+  { value: "online", label: "Video",  icon: "🎥" },
+  { value: "phone",  label: "Phone",  icon: "📞" },
+  { value: "onsite", label: "Onsite", icon: "🏢" },
+];
 
 function InterviewModal({ job, onConfirm, onClose }: {
   job: { title?: string; company?: string };
   onConfirm: (f: InterviewFields) => void;
   onClose: () => void;
 }) {
-  const [f, setF] = useState<InterviewFields>({ date: "", time: "", type: "online", link: "" });
-  const set = (k: keyof InterviewFields) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement>) =>
-    setF(p => ({ ...p, [k]: e.target.value }));
-  const valid = !!(f.date && f.time);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [interviewType, setInterviewType] = useState<InterviewFields["type"]>("online");
+  const [link, setLink] = useState("");
+  const valid = !!selectedDate;
+
+  const toFields = (): InterviewFields => ({
+    date: selectedDate!.toISOString().split("T")[0],
+    time: `${String(selectedDate!.getHours()).padStart(2,"0")}:${String(selectedDate!.getMinutes()).padStart(2,"0")}`,
+    type: interviewType,
+    link,
+  });
 
   const calUrl = () => {
-    const start = `${f.date.replace(/-/g,"")}T${f.time.replace(":","")  }00`;
-    const [h,m] = f.time.split(":").map(Number);
-    const end = `${f.date.replace(/-/g,"")}T${String(h+1).padStart(2,"0")}${String(m).padStart(2,"0")}00`;
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Interview – ${job.title} @ ${job.company}`)}&dates=${start}/${end}&details=${encodeURIComponent(f.link?`Link: ${f.link}`:`Type: ${f.type}`)}`;
+    const pad = (n: number) => String(n).padStart(2,"0");
+    const d = selectedDate!;
+    const end = new Date(d.getTime() + 60 * 60 * 1000);
+    const fmt = (dt: Date) =>
+      `${dt.getFullYear()}${pad(dt.getMonth()+1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`Interview – ${job.title} @ ${job.company}`)}&dates=${fmt(d)}/${fmt(end)}&details=${encodeURIComponent(link ? `Link: ${link}` : `Type: ${interviewType}`)}`;
   };
 
   return (
     <>
       <Backdrop onClose={onClose} />
       <div style={modalBox}>
-        <div style={{ marginBottom: 22 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: C.blue, marginBottom: 6 }}>Interview Scheduled</div>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>{job.title}</div>
-          <div style={{ fontSize: 13, color: C.text2 }}>{job.company}</div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ display: "flex", gap: 12 }}>
-            <Field label="Date"><input type="date" value={f.date} onChange={set("date")} style={inputStyle} /></Field>
-            <Field label="Time"><input type="time" value={f.time} onChange={set("time")} style={inputStyle} /></Field>
+
+        {/* Header */}
+        <div style={{ padding: "22px 24px 18px", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 12 }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: 13, flexShrink: 0,
+              background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.2)",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21,
+            }}>📅</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", color: C.blue, marginBottom: 3 }}>
+                Schedule interview
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {job.title}
+              </div>
+            </div>
+            <button onClick={onClose}
+              style={{ background: "none", border: "none", color: C.text3, cursor: "pointer", padding: 6, fontSize: 18, lineHeight: 1, borderRadius: 8, transition: "background .12s, color .12s" }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.bg3; e.currentTarget.style.color = C.text2; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = C.text3; }}
+            >✕</button>
           </div>
-          <Field label="Type">
-            <select value={f.type} onChange={set("type") as any} style={{ ...inputStyle, cursor: "pointer" }}>
-              <option value="online">Online / Video call</option>
-              <option value="phone">Phone screen</option>
-              <option value="onsite">Onsite</option>
-            </select>
-          </Field>
-          {f.type !== "onsite" && (
-            <Field label="Meeting Link (optional)">
-              <input type="url" placeholder="https://meet.google.com/…" value={f.link} onChange={set("link")} style={inputStyle} />
-            </Field>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 7, background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 8, padding: "5px 12px" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: `${C.blue}60`, flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: C.text2, fontWeight: 500 }}>{job.company}</span>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+          {/* Calendar — side by side layout */}
+          <div>
+            <span style={labelStyle}>Date &amp; Time</span>
+            <div style={{ background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 12, overflow: "hidden" }}>
+              <DatePicker
+                selected={selectedDate}
+                onChange={(date: any) => setSelectedDate(date)}
+                showTimeSelect
+                timeIntervals={15}
+                minDate={new Date()}
+                inline
+              />
+            </div>
+            {selectedDate && (
+              <div style={{
+                marginTop: 8, padding: "10px 14px",
+                background: "rgba(59,130,246,0.08)", border: `1px solid rgba(59,130,246,0.2)`,
+                borderRadius: 10, fontSize: 12, color: C.blue, fontWeight: 600,
+                display: "flex", alignItems: "center", gap: 8,
+              }}>
+                <span>📅</span>
+                {selectedDate.toLocaleString("en-US", {
+                  weekday: "short", month: "short", day: "numeric",
+                  year: "numeric", hour: "numeric", minute: "2-digit",
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Interview type — segmented control */}
+          <div>
+            <span style={labelStyle}>Interview type</span>
+            <div style={{
+              display: "flex", background: C.bg3, border: `1px solid ${C.border2}`,
+              borderRadius: 10, padding: 3, gap: 2,
+            }}>
+              {TYPE_OPTIONS.map(opt => {
+                const active = interviewType === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setInterviewType(opt.value)}
+                    style={{
+                      flex: 1, padding: "9px 4px", border: "none",
+                      borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                      fontSize: 12, fontWeight: 600,
+                      background: active ? "rgba(59,130,246,0.2)" : "transparent",
+                      color: active ? C.blue : C.text3,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      transition: "background .15s, color .15s",
+                    }}
+                  >
+                    <span style={{ fontSize: 15 }}>{opt.icon}</span>
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Meeting link */}
+          {interviewType !== "onsite" && (
+            <div>
+              <span style={labelStyle}>
+                Meeting link{" "}
+                <span style={{ textTransform: "none", fontWeight: 400, letterSpacing: 0, color: C.text3 }}>— optional</span>
+              </span>
+              <div style={fieldBox}>
+                <span style={{ fontSize: 15, flexShrink: 0, color: C.text3 }}>🔗</span>
+                <input
+                  type="url"
+                  placeholder="https://meet.google.com/…"
+                  value={link}
+                  onChange={e => setLink(e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
           )}
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
-          <button onClick={onClose} style={{ flex:1, background:"transparent", border:`1px solid ${C.border2}`, color:C.text2, fontSize:12, fontWeight:600, padding:"10px 0", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
-          <button onClick={() => { if(!valid) return; onConfirm(f); window.open(calUrl(),"_blank","noopener"); }} disabled={!valid}
-            style={{ flex:2, background: valid ? C.blue : C.border2, border:"none", color: valid ? "#fff" : C.text3, fontSize:12, fontWeight:700, padding:"10px 0", borderRadius:8, cursor: valid?"pointer":"not-allowed", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:7 }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-            </svg>
-            Save &amp; Add to Calendar
+
+        {/* Footer */}
+        <div style={{ padding: "0 24px 22px", display: "flex", gap: 10 }}>
+          <button onClick={onClose} style={{
+            flex: 1, padding: "12px 0", borderRadius: 10, fontFamily: "inherit",
+            fontSize: 13, fontWeight: 600, cursor: "pointer",
+            background: "transparent", border: `1px solid ${C.border2}`, color: C.text2,
+            transition: "border-color .15s, color .15s",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.text; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.text2; }}
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!valid}
+            onClick={() => { if (!valid) return; onConfirm(toFields()); window.open(calUrl(), "_blank", "noopener"); }}
+            style={{
+              flex: 2, padding: "12px 0", borderRadius: 10, fontFamily: "inherit",
+              fontSize: 13, fontWeight: 700,
+              cursor: valid ? "pointer" : "not-allowed",
+              background: valid ? C.blue : C.border2,
+              border: "none", color: valid ? "#fff" : C.text3,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              transition: "background .15s, opacity .15s", opacity: valid ? 1 : 0.45,
+            }}
+          >
+            📅 Save &amp; add to calendar
           </button>
         </div>
-        <p style={{ fontSize:11, color:C.text3, textAlign:"center", marginTop:10, marginBottom:0 }}>Opens Google Calendar in a new tab</p>
+        <p style={{ fontSize: 11, color: C.text3, textAlign: "center", margin: "0 0 14px", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+          <span>↗</span> Opens Google Calendar in a new tab
+        </p>
       </div>
     </>
   );
 }
 
+// ── OfferAcceptModal ──────────────────────────────────────────────────────────
 function OfferAcceptModal({ job, onConfirm, onClose }: {
   job: { title?: string; company?: string };
   onConfirm: (joiningDate?: string) => void;
   onClose: () => void;
 }) {
-  const [date, setDate] = useState("");
-  const calUrl = () => {
-    const d = date.replace(/-/g,"");
-    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`🎊 First Day – ${job.company}`)}&dates=${d}/${d}&details=${encodeURIComponent(`Starting ${job.title} at ${job.company}`)}`;
-  };
   return (
     <>
       <Backdrop onClose={onClose} />
-      <div style={{ ...modalBox, width:"min(400px,calc(100vw - 32px))" }}>
-        <div style={{ textAlign:"center", marginBottom:22 }}>
-          <div style={{ fontSize:38, marginBottom:10 }}>🎊</div>
-          <div style={{ fontSize:17, fontWeight:700, marginBottom:4 }}>Congratulations!</div>
-          <div style={{ fontSize:13, color:C.text2 }}>You accepted <strong style={{ color:C.text }}>{job.title}</strong> at <strong style={{ color:C.text }}>{job.company}</strong></div>
+      <div style={{ ...modalBox, width: "min(400px,calc(100vw - 32px))" }}>
+        <div style={{
+          background: "linear-gradient(160deg, rgba(34,197,94,0.1), rgba(34,197,94,0.02))",
+          borderBottom: `1px solid rgba(34,197,94,0.14)`,
+          padding: "32px 24px 24px", textAlign: "center",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+        }}>
+          <div style={{ fontSize: 40, lineHeight: 1 }}>🎊</div>
+          <div style={{ fontSize: 19, fontWeight: 700, color: C.text }}>Congratulations!</div>
+          <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.65 }}>
+            You accepted <strong style={{ color: C.text }}>{job.title}</strong>
+            <br />at <strong style={{ color: C.text }}>{job.company}</strong>
+          </div>
+          <div style={{ width: 44, height: 2, background: "rgba(34,197,94,0.45)", borderRadius: 2, marginTop: 2 }} />
         </div>
-        <Field label="Joining Date (optional)">
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
-        </Field>
-        <div style={{ display:"flex", gap:10, marginTop:20 }}>
-          <button onClick={onClose} style={{ flex:1, background:"transparent", border:`1px solid ${C.border2}`, color:C.text2, fontSize:12, fontWeight:600, padding:"10px 0", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
-          <button onClick={() => { onConfirm(date||undefined); if(date) window.open(calUrl(),"_blank","noopener"); }}
-            style={{ flex:2, background:C.green, border:"none", color:"#fff", fontSize:12, fontWeight:700, padding:"10px 0", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>
-            {date ? "Accept & Add to Calendar" : "Accept Offer ✓"}
+        <div style={{ display: "flex", gap: 10, padding: "20px 24px 22px" }}>
+          <button onClick={onClose} style={{
+            flex: 1, background: "transparent", border: `1px solid ${C.border2}`,
+            color: C.text2, fontSize: 13, fontWeight: 600, padding: "12px 0",
+            borderRadius: 10, cursor: "pointer", fontFamily: "inherit",
+            transition: "border-color .15s, color .15s",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.text; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.text2; }}
+          >Cancel</button>
+          <button onClick={() => onConfirm(undefined)} style={{
+            flex: 2, background: C.green, border: "none", color: "#fff",
+            fontSize: 13, fontWeight: 700, padding: "12px 0",
+            borderRadius: 10, cursor: "pointer", fontFamily: "inherit",
+          }}>
+            Accept offer ✓
           </button>
         </div>
       </div>
@@ -170,30 +316,102 @@ function OfferAcceptModal({ job, onConfirm, onClose }: {
   );
 }
 
+// ── OfferExpiryModal ──────────────────────────────────────────────────────────
 function OfferExpiryModal({ job, onClose }: { job: { title?: string; company?: string }; onClose: () => void; }) {
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("17:00");
-  const valid = !!date;
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const valid = !!selectedDate;
+
   return (
     <>
       <Backdrop onClose={onClose} />
-      <div style={{ ...modalBox, width:"min(400px,calc(100vw - 32px))" }}>
-        <div style={{ marginBottom:22 }}>
-          <div style={{ fontSize:10, fontWeight:700, letterSpacing:"0.18em", textTransform:"uppercase", color:C.accent, marginBottom:6 }}>Offer Deadline</div>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>Set an expiry reminder</div>
-          <div style={{ fontSize:13, color:C.text2 }}>{job.title} · {job.company}</div>
+      <div style={{ ...modalBox, width: "min(400px,calc(100vw - 32px))" }}>
+        <div style={{ padding: "22px 24px 18px", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 12 }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: 13, flexShrink: 0,
+              background: "rgba(245,155,0,0.15)", border: "1px solid rgba(245,155,0,0.2)",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 21,
+            }}>⏰</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", color: C.accent, marginBottom: 3 }}>
+                Offer deadline
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Set an expiry reminder</div>
+            </div>
+            <button onClick={onClose}
+              style={{ background: "none", border: "none", color: C.text3, cursor: "pointer", padding: 6, fontSize: 18, lineHeight: 1, borderRadius: 8, transition: "background .12s, color .12s" }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.bg3; e.currentTarget.style.color = C.text2; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = C.text3; }}
+            >✕</button>
+          </div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 7, background: C.bg3, border: `1px solid ${C.border2}`, borderRadius: 8, padding: "5px 12px" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: `${C.accent}60`, flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: C.text2, fontWeight: 500 }}>{job.title} · {job.company}</span>
+          </div>
         </div>
-        <div style={{ display:"flex", gap:12 }}>
-          <Field label="Expiry Date"><input type="date" value={date} onChange={e=>setDate(e.target.value)} style={inputStyle}/></Field>
-          <Field label="Time"><input type="time" value={time} onChange={e=>setTime(e.target.value)} style={inputStyle}/></Field>
+
+        <div style={{ padding: "20px 24px" }}>
+          <span style={labelStyle}>Expiry date &amp; time</span>
+          <DatePicker
+            selected={selectedDate}
+            onChange={(date: any) => setSelectedDate(date)}
+            showTimeSelect
+            timeIntervals={15}
+            minDate={new Date()}
+            placeholderText="Pick expiry date and time…"
+            customInput={
+              <div style={{ ...fieldBox, cursor: "pointer" }}>
+                <span style={{ fontSize: 15, flexShrink: 0, color: valid ? C.accent : C.text3 }}>⏰</span>
+                <span style={{ fontSize: 13, color: selectedDate ? C.text : C.text3, flex: 1 }}>
+                  {selectedDate
+                    ? selectedDate.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })
+                    : "Pick expiry date and time…"}
+                </span>
+                <span style={{ fontSize: 11, color: C.text3 }}>▾</span>
+              </div>
+            }
+          />
+          {selectedDate && (
+            <div style={{
+              marginTop: 8, padding: "10px 14px",
+              background: "rgba(245,155,0,0.08)", border: `1px solid rgba(245,155,0,0.2)`,
+              borderRadius: 10, fontSize: 12, color: C.accent, fontWeight: 600,
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <span>⏰</span>
+              {selectedDate.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+            </div>
+          )}
         </div>
-        <div style={{ display:"flex", gap:10, marginTop:22 }}>
-          <button onClick={onClose} style={{ flex:1, background:"transparent", border:`1px solid ${C.border2}`, color:C.text2, fontSize:12, fontWeight:600, padding:"10px 0", borderRadius:8, cursor:"pointer", fontFamily:"inherit" }}>Skip</button>
+
+        <div style={{ display: "flex", gap: 10, padding: "0 24px 22px" }}>
+          <button onClick={onClose} style={{
+            flex: 1, background: "transparent", border: `1px solid ${C.border2}`,
+            color: C.text2, fontSize: 13, fontWeight: 600, padding: "12px 0",
+            borderRadius: 10, cursor: "pointer", fontFamily: "inherit",
+            transition: "border-color .15s, color .15s",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.text; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.text2; }}
+          >Skip</button>
           <button disabled={!valid} onClick={() => {
-            const d=date.replace(/-/g,""), t=time.replace(":","");
-            window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`⏰ Offer Expiry – ${job.company}`)}&dates=${d}T${t}00/${d}T${t}00&details=${encodeURIComponent(`Offer for ${job.title} at ${job.company} expires today`)}`, "_blank","noopener");
+            if (!valid || !selectedDate) return;
+            const pad = (n: number) => String(n).padStart(2,"0");
+            const d = `${selectedDate.getFullYear()}${pad(selectedDate.getMonth()+1)}${pad(selectedDate.getDate())}`;
+            const t = `${pad(selectedDate.getHours())}${pad(selectedDate.getMinutes())}00`;
+            window.open(
+              `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(`⏰ Offer Expiry – ${job.company}`)}&dates=${d}T${t}/${d}T${t}&details=${encodeURIComponent(`Offer for ${job.title} at ${job.company} expires today`)}`,
+              "_blank", "noopener"
+            );
             onClose();
-          }} style={{ flex:2, background: valid?C.accent:C.border2, border:"none", color: valid?"#000":C.text3, fontSize:12, fontWeight:700, padding:"10px 0", borderRadius:8, cursor: valid?"pointer":"not-allowed", fontFamily:"inherit" }}>
+          }} style={{
+            flex: 2, background: valid ? C.accent : C.border2,
+            border: "none", color: valid ? "#000" : C.text3,
+            fontSize: 13, fontWeight: 700, padding: "12px 0",
+            borderRadius: 10, cursor: valid ? "pointer" : "not-allowed",
+            fontFamily: "inherit", opacity: valid ? 1 : 0.45,
+            transition: "background .15s, opacity .15s",
+          }}>
             Add to Google Calendar
           </button>
         </div>
@@ -215,8 +433,14 @@ function ActionBtn({ label, color, onClick, full }: { label: string; color: stri
         letterSpacing: "0.03em", transition: "background .15s, border-color .15s",
         whiteSpace: "nowrap", position: "relative", zIndex: 2,
       }}
-      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = `${color}18`; (e.currentTarget as HTMLButtonElement).style.borderColor = `${color}70`; }}
-      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.borderColor = `${color}40`; }}
+      onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
+        e.currentTarget.style.background = `${color}18`;
+        e.currentTarget.style.borderColor = `${color}70`;
+      }}
+      onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.borderColor = `${color}40`;
+      }}
     >
       {label}
     </button>
@@ -239,16 +463,13 @@ function KanbanCard({ a, stage, onModal }: {
       onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = "rgba(245,155,0,0.22)"; el.style.boxShadow = "0 4px 16px rgba(0,0,0,0.4)"; }}
       onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = C.border2; el.style.boxShadow = "none"; }}
     >
-      {/* Score accent line */}
       {a.ai_score && (
         <div style={{ height: 2, background: `linear-gradient(90deg, ${scoreColor} 0%, transparent ${a.ai_score}%)` }} />
       )}
-
-      {/* Card body */}
       <Link to="/jobs/$id" params={{ id: a.job_id }}
         style={{ display: "block", padding: "11px 12px 9px", textDecoration: "none", color: "inherit" }}
-        onMouseEnter={e => ((e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.02)")}
-        onMouseLeave={e => ((e.currentTarget as HTMLAnchorElement).style.background = "transparent")}
+        onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.background = "rgba(255,255,255,0.02)"; }}
+        onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => { e.currentTarget.style.background = "transparent"; }}
       >
         <div style={{ fontSize: 13, fontWeight: 650, color: C.text, lineHeight: 1.35, marginBottom: 4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" }}>
           {a.job?.title}
@@ -266,8 +487,6 @@ function KanbanCard({ a, stage, onModal }: {
           </div>
         )}
       </Link>
-
-      {/* Action zone */}
       <div style={{ padding: "0 10px 10px" }}>
         {stage === "saved" && (
           <ActionBtn label="Mark Applied →" color={C.accent} full onClick={() => onModal("move-applied", a.job_id, a.job)} />
@@ -347,7 +566,6 @@ function AppsPage() {
     });
   };
 
-  // Handle simple "move-*" modal types inline
   const handleModal = (type: string, job_id: string, job: any) => {
     if (type === "move-applied")  { moveCard(job_id, "applied"); return; }
     if (type === "move-rejected") { moveCard(job_id, "rejected"); return; }
@@ -362,10 +580,9 @@ function AppsPage() {
     return () => window.removeEventListener("keydown", h);
   }, []);
 
-  // Stats
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
-    (apps ?? []).forEach(a => { map[a.status] = (map[a.status] ?? 0) + 1; });
+    (apps ?? []).forEach((a: { status: string }) => { map[a.status] = (map[a.status] ?? 0) + 1; });
     return map;
   }, [apps]);
 
@@ -377,16 +594,170 @@ function AppsPage() {
       minHeight: "100vh", background: C.bg, color: C.text,
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     }}>
-      <style>{`
-        .apps-board::-webkit-scrollbar { height: 5px; }
-        .apps-board::-webkit-scrollbar-track { background: transparent; }
-        .apps-board::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
-        .apps-board::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
-      `}</style>
+<style>{`
+  .apps-board::-webkit-scrollbar { height: 5px; }
+  .apps-board::-webkit-scrollbar-track { background: transparent; }
+  .apps-board::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 4px; }
+  .apps-board::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+  .react-datepicker {
+    background: #161616 !important;
+    border: 1px solid #252525 !important;
+    border-radius: 12px !important;
+    font-family: inherit !important;
+    color: #fff !important;
+    width: 100% !important;
+  }
+
+  .react-datepicker__triangle {
+    display: none !important;
+  }
+
+  .react-datepicker__header {
+    background: #111 !important;
+    border-bottom: 1px solid #1e1e1e !important;
+    border-radius: 12px 12px 0 0 !important;
+    padding-top: 12px !important;
+  }
+
+  .react-datepicker__current-month,
+  .react-datepicker-time__header {
+    color: #fff !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+  }
+
+  .react-datepicker__day-name {
+    color: #555 !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+  }
+
+  .react-datepicker__day {
+    color: #888 !important;
+    border-radius: 7px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+  }
+
+  .react-datepicker__day:hover {
+    background: #252525 !important;
+    color: #fff !important;
+  }
+
+  .react-datepicker__day--selected {
+    background: #3B82F6 !important;
+    color: #fff !important;
+    font-weight: 700 !important;
+  }
+
+  .react-datepicker__day--keyboard-selected {
+    background: #3B82F640 !important;
+    color: #fff !important;
+  }
+
+  .react-datepicker__day--disabled {
+    color: #2a2a2a !important;
+    cursor: default !important;
+  }
+
+  .react-datepicker__day--today {
+    color: #F59B00 !important;
+  }
+
+  .react-datepicker__navigation-icon::before {
+    border-color: #555 !important;
+  }
+
+  .react-datepicker__navigation:hover .react-datepicker__navigation-icon::before {
+    border-color: #fff !important;
+  }
+
+  .react-datepicker__navigation--previous {
+    left: 8px !important;
+  }
+
+  .react-datepicker__navigation--next {
+    right: 108px !important;
+  }
+
+  .react-datepicker__inner-container {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .react-datepicker__month-container {
+    float: left !important;
+  }
+
+  .react-datepicker__time-container {
+    float: right !important;
+    width: 108px !important;
+    border-left: 1px solid #1e1e1e !important;
+  }
+
+  .react-datepicker__time {
+    background: #161616 !important;
+  }
+
+  .react-datepicker__time-box {
+    width: 108px !important;
+    border-radius: 0 0 12px 0 !important;
+  }
+
+  .react-datepicker__time-list {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2a transparent;
+    height: 220px !important;
+  }
+
+  .react-datepicker__time-list-item {
+    color: #888 !important;
+    font-size: 12px !important;
+    border-radius: 6px !important;
+    margin: 1px 4px !important;
+    white-space: nowrap !important;
+  }
+
+  .react-datepicker__time-list-item:hover {
+    background: #252525 !important;
+    color: #fff !important;
+  }
+
+  .react-datepicker__time-list-item--selected {
+    background: #3B82F6 !important;
+    color: #fff !important;
+    font-weight: 700 !important;
+  }
+
+  .react-datepicker__week {
+    display: flex !important;
+  }
+
+  .react-datepicker__day-names {
+    display: flex !important;
+  }
+
+  .react-datepicker__day-name,
+  .react-datepicker__day {
+    flex: 1 !important;
+    width: auto !important;
+    margin: 1px !important;
+    text-align: center !important;
+    line-height: 28px !important;
+  }
+
+  .react-datepicker-popper {
+    z-index: 200 !important;
+  }
+
+  .react-datepicker-time__header {
+    font-size: 11px !important;
+    padding: 4px 0 !important;
+  }
+`}</style>
 
       <div style={{ padding: "28px 24px 16px" }}>
-
-        {/* ── Header ── */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 20 }}>
           <div>
             <div style={{ fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: C.accent, marginBottom: 6, fontWeight: 700 }}>
@@ -396,15 +767,13 @@ function AppsPage() {
               Your Applications
             </h1>
           </div>
-
-          {/* Pipeline health stats */}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {[
-              { val: total,                         label: "total",        color: C.text   },
-              { val: counts.applied ?? 0,           label: "applied",      color: C.accent },
-              { val: (counts.interviewing ?? 0),    label: "interviewing", color: C.blue   },
-              { val: (counts.offer ?? 0),           label: "offers",       color: C.green  },
-              { val: `${activeRate}%`,              label: "active rate",  color: C.purple },
+              { val: total,                      label: "total",        color: C.text   },
+              { val: counts.applied ?? 0,        label: "applied",      color: C.accent },
+              { val: counts.interviewing ?? 0,   label: "interviewing", color: C.blue   },
+              { val: counts.offer ?? 0,          label: "offers",       color: C.green  },
+              { val: `${activeRate}%`,           label: "active rate",  color: C.purple },
             ].map(({ val, label, color }) => (
               <div key={label} style={{
                 background: C.bg2, border: `1px solid ${C.border}`,
@@ -417,7 +786,6 @@ function AppsPage() {
           </div>
         </div>
 
-        {/* ── Stage progress strip ── */}
         <div style={{
           display: "flex", gap: 0, marginBottom: 20,
           background: C.bg2, border: `1px solid ${C.border}`,
@@ -449,13 +817,12 @@ function AppsPage() {
         </div>
       </div>
 
-      {/* ── Kanban board ── */}
       <div className="apps-board" style={{
         display: "flex", gap: 10, overflowX: "auto",
         padding: "0 24px 32px", alignItems: "flex-start",
       }}>
         {STAGES.map((stage) => {
-          const items = (apps ?? []).filter(a => a.status === stage);
+          const items = (apps ?? []).filter((a: { status: string }) => a.status === stage);
           const meta  = STAGE_META[stage];
           return (
             <div key={stage} style={{
@@ -464,7 +831,6 @@ function AppsPage() {
               minHeight: 240, flex: "0 0 248px", width: 248,
               display: "flex", flexDirection: "column", gap: 0,
             }}>
-              {/* Column header */}
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: 12 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                   <div style={{ width:7, height:7, borderRadius:"50%", background: meta.color, flexShrink:0 }} />
@@ -482,10 +848,8 @@ function AppsPage() {
                   {items.length}
                 </span>
               </div>
-
-              {/* Cards */}
               <div style={{ display:"flex", flexDirection:"column", gap:8, flex:1 }}>
-                {items.map(a => (
+                {items.map((a: any) => (
                   <KanbanCard key={a.id} a={a} stage={stage} onModal={handleModal} />
                 ))}
                 {items.length === 0 && (
@@ -503,7 +867,6 @@ function AppsPage() {
         })}
       </div>
 
-      {/* ── Modals ── */}
       {modal?.type === "interview" && (
         <InterviewModal job={modal.job} onClose={() => setModal(null)}
           onConfirm={fields => {
@@ -518,7 +881,7 @@ function AppsPage() {
       )}
       {modal?.type === "offer-accept" && (
         <OfferAcceptModal job={modal.job} onClose={() => setModal(null)}
-          onConfirm={date => {
+          onConfirm={() => {
             moveCard(modal.job_id, "accepted", `🎊 Congratulations! You accepted ${modal.job?.title}!`);
             setModal(null);
           }}

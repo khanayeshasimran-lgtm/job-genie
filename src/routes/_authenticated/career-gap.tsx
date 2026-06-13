@@ -6,6 +6,7 @@ import { useState, useRef } from "react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/career-gap")({
+  ssr: false,
   component: CareerGapPage,
 });
 
@@ -201,53 +202,68 @@ function CareerGapPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const mut = useMutation({
-    mutationFn: () =>
-      analyzeFn({ data: { text: resumeText, target_role: targetRole } }),
-    onSuccess: (r) => setResult(r),
-    onError: (e) => toast.error((e as Error).message),
+    mutationFn: async () => {
+      try {
+        return await analyzeFn({ data: { text: resumeText, target_role: targetRole } });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Analysis failed. Please try again.";
+        throw new Error(msg);
+      }
+    },
+    onSuccess: (r) => setResult(r as GapResult),
+    onError: (e) => toast.error((e as Error).message ?? "Analysis failed. Please try again."),
   });
 
   async function handleFile(file: File) {
     setFileName(file.name);
     try {
       if (file.type === "text/plain") {
-        setResumeText(await file.text());
+        const text = await file.text();
+        setResumeText(text);
+        toast.success("File loaded");
         return;
       }
       if (file.type === "application/pdf") {
+        // Use pdf.js 2.x legacy build — it correctly exposes window.pdfjsLib
         await loadScript(
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js",
           "pdfjs"
         );
         const pdfjsLib = (window as any).pdfjsLib;
+        if (!pdfjsLib) throw new Error("pdf.js failed to load");
         pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        const pdf = await pdfjsLib
-          .getDocument({ data: await file.arrayBuffer() })
-          .promise;
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         let text = "";
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const c = await page.getTextContent();
           text += c.items.map((x: any) => x.str).join(" ") + "\n";
         }
+        if (!text.trim()) throw new Error("PDF appears to be image-only or empty");
         setResumeText(text);
-        toast.success("PDF extracted");
+        toast.success(`PDF extracted (${pdf.numPages} pages)`);
         return;
       }
-      if (file.name.endsWith(".docx")) {
+      if (file.name.endsWith(".docx") || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
         await loadScript(
           "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js",
           "mammoth"
         );
-        const r = await (window as any).mammoth.extractRawText({
-          arrayBuffer: await file.arrayBuffer(),
-        });
+        const mammoth = (window as any).mammoth;
+        if (!mammoth) throw new Error("mammoth.js failed to load");
+        const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+        if (!r.value?.trim()) throw new Error("DOCX appears empty");
         setResumeText(r.value);
         toast.success("DOCX extracted");
+        return;
       }
-    } catch {
-      toast.error("Could not read file");
+      toast.error("Unsupported file type. Use PDF, DOCX, or TXT.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not read file";
+      toast.error(msg);
+      setFileName(null);
     }
   }
 

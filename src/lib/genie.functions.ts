@@ -37,7 +37,32 @@ const CAREER_INTENTS = [
 
 function isCareerRelated(message: string): boolean {
   const lower = message.toLowerCase();
-  return CAREER_INTENTS.some((kw) => lower.includes(kw));
+  return CAREER_INTENTS.some((kw: string) => lower.includes(kw));
+}
+
+interface Job {
+  title: string;
+  company: string;
+  location: string;
+  experience_level?: string;
+}
+
+interface Application {
+  status: string;
+  interview_at?: string | null;
+  offer_expires_at?: string | null;
+  joining_date?: string | null;
+  assessment_due_at?: string | null;
+  next_action_at?: string | null;
+  next_action_label?: string | null;
+  ai_score?: number | null;
+  ai_match_reasons?: string[] | null;
+  ai_gaps?: string[] | null;
+  job: Job;
+}
+
+interface SavedJob {
+  job: Job;
 }
 
 export const askGenie = createServerFn({ method: "POST" })
@@ -46,7 +71,6 @@ export const askGenie = createServerFn({ method: "POST" })
     z
       .object({
         message: z.string().min(1).max(2000),
-        // Optional: pass prior turns so Genie has conversation memory within a session
         history: z
           .array(
             z.object({
@@ -97,14 +121,14 @@ export const askGenie = createServerFn({ method: "POST" })
     ]);
 
     const profile = profileRes.data;
-    const applications = applicationsRes.data ?? [];
-    const savedJobs = savedJobsRes.data ?? [];
+    const applications: Application[] = (applicationsRes.data ?? []) as Application[];
+    const savedJobs: SavedJob[] = (savedJobsRes.data ?? []) as SavedJob[];
 
     // ── Derived slices ────────────────────────────────────────────────────────
-    const interviews = applications.filter((a) => a.status === "interviewing");
-    const offers = applications.filter((a) => a.status === "offer");
+    const interviews = applications.filter((a: Application) => a.status === "interviewing");
+    const offers = applications.filter((a: Application) => a.status === "offer");
     const pending = applications.filter(
-      (a) =>
+      (a: Application) =>
         a.next_action_at &&
         new Date(a.next_action_at) <= new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
     );
@@ -128,35 +152,35 @@ export const askGenie = createServerFn({ method: "POST" })
         : null,
       applications: {
         total: applications.length,
-        by_status: applications.reduce<Record<string, number>>((acc, a) => {
+        by_status: applications.reduce<Record<string, number>>((acc: Record<string, number>, a: Application) => {
           acc[a.status] = (acc[a.status] ?? 0) + 1;
           return acc;
         }, {}),
-        interviews: interviews.map((a) => ({
+        interviews: interviews.map((a: Application) => ({
           job: a.job,
           interview_at: a.interview_at,
           assessment_due_at: a.assessment_due_at,
         })),
-        offers: offers.map((a) => ({
+        offers: offers.map((a: Application) => ({
           job: a.job,
           offer_expires_at: a.offer_expires_at,
           joining_date: a.joining_date,
         })),
-        pending_actions: pending.map((a) => ({
+        pending_actions: pending.map((a: Application) => ({
           job: a.job,
           action: a.next_action_label,
           due: a.next_action_at,
         })),
         top_matches: applications
-          .filter((a) => a.ai_score && a.ai_score >= 80)
+          .filter((a: Application) => a.ai_score && a.ai_score >= 80)
           .slice(0, 5)
-          .map((a) => ({
+          .map((a: Application) => ({
             job: a.job,
             score: a.ai_score,
             reasons: a.ai_match_reasons,
           })),
       },
-      saved_jobs: savedJobs.map((s) => s.job),
+      saved_jobs: savedJobs.map((s: SavedJob) => s.job),
     };
 
     // ── Build messages ────────────────────────────────────────────────────────
@@ -184,7 +208,7 @@ Career context:
 ${JSON.stringify(careerContext, null, 2)}`;
 
     const messages = [
-      ...data.history.slice(-6), // Keep last 3 exchanges for context
+      ...data.history.slice(-6),
       { role: "user" as const, content: data.message },
     ];
 

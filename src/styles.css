@@ -19,6 +19,7 @@
  */
 
 @theme inline {
+  
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -212,4 +213,43 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
+}
+
+.react-datepicker {
+  background: #161616 !important;
+  border: 1px solid #252525 !important;
+  color: #fff !important;
+  font-family: inherit !important;
+  width: auto !important;
+}
+
+.react-datepicker__week,
+.react-datepicker__day-names {
+  display: flex !important;
+}
+
+.react-datepicker__day-name,
+.react-datepicker__day {
+  flex: 1 !important;
+  width: auto !important;
+  min-width: 30px !important;
+  margin: 2px !important;
+  text-align: center !important;
+}
+
+.react-datepicker__month-container {
+  min-width: 280px !important;
+}
+
+.react-datepicker__time-container {
+  width: 100px !important;
+  border-left: 1px solid #252525 !important;
+}
+
+.react-datepicker__time-box {
+  width: 100px !important;
+}
+
+.react-datepicker__time-list {
+  height: 220px !important;
 }

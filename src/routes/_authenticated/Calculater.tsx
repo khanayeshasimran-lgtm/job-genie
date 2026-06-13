@@ -913,10 +913,10 @@ function CalendarPage() {
   const nextMonth = () => setCurrentMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
 
   // Applications that have no dates set yet (quick-add panel)
-  const appsWithoutDates = (apps ?? []).filter(
-    (a) => ["applied", "interviewing", "offer"].includes(a.status) &&
-      !a.interview_at && !a.assessment_due_at && !a.offer_expires_at
-  );
+const appsWithoutDates = (apps ?? []).filter(
+  (a: any) => ["applied", "interviewing", "offer"].includes(a.status) &&
+    !a.interview_at && !a.assessment_due_at && !a.offer_expires_at
+);
 
   return (
     <div style={{
@@ -987,7 +987,7 @@ function CalendarPage() {
                   <span style={{ fontSize: 11, color: C.text3 }}>These applications have no calendar events yet</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column" }}>
-                  {appsWithoutDates.map((a, i) => {
+                  {appsWithoutDates.map((a: any, i: number) => {
                     const job = a.job ?? {};
                     return (
                       <div

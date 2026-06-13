@@ -25,7 +25,7 @@ const SIDEBAR_COLLAPSED_W = 56;
 
 // ── Nav items ─────────────────────────────────────────────────────────────────
 const NAV = [
-  {
+    {
     to: "/jobs",
     label: "Jobs",
     icon: (
@@ -35,6 +35,37 @@ const NAV = [
       </svg>
     ),
   },
+        {
+    to: "/career-gap",
+    label: "Career Compass",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+    ),
+  },
+  {
+    to: "/profile",
+    label: "Profile",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+      </svg>
+    ),
+  },
+  
+  {
+    to: "/agent",
+    label: "Agent",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="11" width="18" height="10" rx="2"/>
+        <circle cx="12" cy="5" r="2"/>
+        <path d="M12 7v4M8 11V9M16 11V9"/>
+      </svg>
+    ),
+  },
+
   {
     to: "/applications",
     label: "Applications",
@@ -54,40 +85,11 @@ const NAV = [
     ),
   },
   {
-    to: "/agent",
-    label: "Agent",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="11" width="18" height="10" rx="2"/>
-        <circle cx="12" cy="5" r="2"/>
-        <path d="M12 7v4M8 11V9M16 11V9"/>
-      </svg>
-    ),
-  },
-  {
     to: "/notifications",
     label: "Notifications",
     icon: (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
-      </svg>
-    ),
-  },
-  {
-    to: "/career-gap",
-    label: "Career Gap",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-      </svg>
-    ),
-  },
-  {
-    to: "/profile",
-    label: "Profile",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
       </svg>
     ),
   },
@@ -257,8 +259,7 @@ function NavLink({
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const navigate = useNavigate();
+const pathname = useRouterState({ select: (s: { location: { pathname: string } }) => s.location.pathname });  const navigate = useNavigate();
   const summaryFn = useServerFn(dashboardSummary);
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -405,14 +406,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                     width: "100%",
                     boxSizing: "border-box",
                   }}
-                  onMouseEnter={(e) => {
+onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
                     if (!active) {
                       (e.currentTarget as HTMLAnchorElement).style.background = "rgba(255,255,255,0.04)";
                       (e.currentTarget as HTMLAnchorElement).style.color = C.text;
                     }
                   }}
-                  onMouseLeave={(e) => {
-                    if (!active) {
+onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {                    if (!active) {
                       (e.currentTarget as HTMLAnchorElement).style.background = "transparent";
                       (e.currentTarget as HTMLAnchorElement).style.color = C.text2;
                     }
